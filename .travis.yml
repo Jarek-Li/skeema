@@ -19,8 +19,8 @@ before_install:
 script:
   - go test -v -coverprofile=coverage.out -covermode=count
   - go vet ./...
-  - test -z "$(gofmt -s -d . 2>&1)"
-  - golint -set_exit_status ./...
+  - test -z "$(gofmt -s -d *.go 2>&1)"
+  - golint -set_exit_status .
 
 after_script:
   - goveralls -coverprofile=coverage.out -service=travis-ci

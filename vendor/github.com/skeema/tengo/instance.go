@@ -73,7 +73,8 @@ func NewInstance(driver, dsn string) (*Instance, error) {
 		} else if instance.Password != parsedConfig.Passwd {
 			return nil, fmt.Errorf("Instance already exists, but with different password")
 		} else if !reflect.DeepEqual(instance.defaultParams, params) {
-			return nil, fmt.Errorf("Instance already exists, but with different default params")
+			instance.defaultParams = params
+			///////return nil, fmt.Errorf("Instance already exists, but with different default params")
 		}
 		return instance, nil
 	}

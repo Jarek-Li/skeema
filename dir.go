@@ -80,11 +80,11 @@ func (dir *Dir) CreateIfMissing() (created bool, err error) {
 		return false, nil
 	}
 	if !os.IsNotExist(err) {
-		return false, fmt.Errorf("Unable to use directory %s: %s\n", dir.Path, err)
+		return false, fmt.Errorf("Unable to use directory %s: %s", dir.Path, err)
 	}
 	err = os.MkdirAll(dir.Path, 0777)
 	if err != nil {
-		return false, fmt.Errorf("Unable to create directory %s: %s\n", dir.Path, err)
+		return false, fmt.Errorf("Unable to create directory %s: %s", dir.Path, err)
 	}
 	return true, nil
 }
