@@ -6,12 +6,13 @@ import (
 	"os"
 	"strings"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 func init() {
 	log.SetFormatter(&customFormatter{
-		isTerminal: log.IsTerminal(os.Stderr),
+		isTerminal: terminal.IsTerminal(int(os.Stderr.Fd())),
 	})
 }
 
