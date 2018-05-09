@@ -123,7 +123,7 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 			aSectionsWithPort := aOptionFile.SectionsWithOption("port")
 			bSectionsWithPort := bOptionFile.SectionsWithOption("port")
 			if !reflect.DeepEqual(aSectionsWithPort, bSectionsWithPort) {
-				t.Errorf("Sections with port option do not match between %s and %s", a, b)
+				t.Errorf("Sections with port option do not match between %s and %s", aOptionFile.Path(), bOptionFile.Path())
 			} else {
 				for _, section := range bSectionsWithPort {
 					bOptionFile.UseSection(section)
@@ -132,7 +132,9 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 				}
 			}
 
-			// TODO COMPARE THE FILES !!!!
+			if !aOptionFile.SameContents(bOptionFile) {
+				t.Errorf("File contents do not match between %s and %s", aOptionFile.Path(), bOptionFile.Path())
+			}
 		}
 
 		// Compare *.sql files
