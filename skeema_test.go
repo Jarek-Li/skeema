@@ -96,6 +96,27 @@ func (s *SkeemaIntegrationSuite) BeforeTest(method string, backend string) error
 	return nil
 }
 
+// HandleCommand exuctes the supplied Skeema command-line, and confirms its exit
+// code matches the expected value.
+func (s *SkeemaIntegrationSuite) HandleCommand(t *testing.T, expectedExitCode int, commandLine string, a ...interface{}) *mybase.Config {
+	fullCommandLine := fmt.Sprintf(commandLine, a...)
+	fakeFileSource := mybase.SimpleSource(map[string]string{"password": s.d.Instance.Password})
+	cfg := mybase.ParseFakeCLI(t, CommandSuite, fullCommandLine, fakeFileSource)
+	err := cfg.HandleCommand()
+	var actualExitCode int
+	if err == nil {
+		actualExitCode = 0
+	} else if ev, ok := err.(*ExitValue); ok {
+		actualExitCode = ev.Code
+	} else {
+		t.Fatalf("Error return from `%s`: %s", fullCommandLine, err)
+	}
+	if actualExitCode != expectedExitCode {
+		t.Fatalf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)
+	}
+	return cfg
+}
+
 // VerifyFiles compares the files in testdata/.tmpworkspace to the files in the
 // specified dir, and fails the test if any differences are found.
 func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, dirExpectedBase string) {

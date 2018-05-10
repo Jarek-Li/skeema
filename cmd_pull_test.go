@@ -1,14 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"testing"
-
-	"github.com/skeema/mybase"
 )
 
 func (s *SkeemaIntegrationSuite) TestPullHandler(t *testing.T) {
-	s.doInitSetup(t)
+	s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 
 	// In product db, alter one table and drop one table;
 	// In analytics db, add one table and alter the schema's charset and collation;
@@ -17,10 +14,6 @@ func (s *SkeemaIntegrationSuite) TestPullHandler(t *testing.T) {
 		t.Fatalf("Unable to setup test: %s", err)
 	}
 
-	commandLine := fmt.Sprintf("skeema pull -p%s", s.d.Instance.Password)
-	cfg := mybase.ParseFakeCLI(t, CommandSuite, commandLine)
-	if err := cfg.HandleCommand(); err != nil {
-		t.Fatalf("Error returned: %s", err)
-	}
+	cfg := s.HandleCommand(t, CodeSuccess, "skeema pull")
 	s.VerifyFiles(t, cfg, "../golden/pull1")
 }
