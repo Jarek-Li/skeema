@@ -15,3 +15,12 @@ func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
 	}
 	s.VerifyFiles(t, cfg, "../golden/init")
 }
+
+// doInitSetup is intended for use in tests of *other* commands, which
+// want to run init as a first step
+func (s *SkeemaIntegrationSuite) doInitSetup(t *testing.T) {
+	s.TestInitHandler(t)
+	if t.Failed() {
+		t.Fatal("Failed to perform init setup step")
+	}
+}
