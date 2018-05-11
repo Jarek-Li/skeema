@@ -53,11 +53,12 @@ func (s *SkeemaIntegrationSuite) TestAddEnvHandler(t *testing.T) {
 		t.Fatalf("File contents of %s do not match expectation", file.Path())
 	}
 
-	// Nonstandard port should work properly
-	cfg = s.HandleCommand(t, CodeSuccess, "skeema add-environment --host my.ci.db.com -P 3307 --dir mydb ci")
+	// Nonstandard port should work properly; ditto for user option persisting
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema add-environment --host my.ci.db.com -P 3307 -ufoobar --dir mydb ci")
 	file = getOptionFile("mydb", cfg)
 	origFile.SetOptionValue("ci", "host", "my.ci.db.com")
 	origFile.SetOptionValue("ci", "port", "3307")
+	origFile.SetOptionValue("ci", "user", "foobar")
 	if !origFile.SameContents(file) {
 		t.Fatalf("File contents of %s do not match expectation", file.Path())
 	}
