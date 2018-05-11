@@ -1,12 +1,16 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/pmezard/go-difflib/difflib"
+	log "github.com/sirupsen/logrus"
 	"github.com/skeema/mybase"
 	"github.com/skeema/tengo"
 )
@@ -15,6 +19,12 @@ func TestMain(m *testing.M) {
 	// Suppress packet error output when attempting to connect to a Dockerized
 	// mysql-server which is still starting up
 	tengo.UseFilteredDriverLogger()
+
+	// Omit skeema output unless running test with verbose flag
+	flag.Parse()
+	if !testing.Verbose() {
+		log.SetLevel(log.PanicLevel)
+	}
 
 	// Add global options to the global command suite, just like in main()
 	AddGlobalOptions(CommandSuite)
@@ -172,6 +182,21 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 		} else {
 			for n := range aSQLFiles {
 				if aSQLFiles[n].FileName != bSQLFiles[n].FileName || aSQLFiles[n].Contents != bSQLFiles[n].Contents {
+					diff := difflib.UnifiedDiff{
+						A:        difflib.SplitLines(aSQLFiles[n].Contents),
+						B:        difflib.SplitLines(bSQLFiles[n].Contents),
+						FromFile: aSQLFiles[n].Path(),
+						ToFile:   bSQLFiles[n].Path(),
+						Context:  0,
+					}
+					diffText, err := difflib.GetUnifiedDiffString(diff)
+					if err == nil {
+						for _, line := range strings.Split(diffText, "\n") {
+							if len(line) > 0 {
+								t.Log(line)
+							}
+						}
+					}
 					t.Errorf("Difference found in %s vs %s", aSQLFiles[n].Path(), bSQLFiles[n].Path())
 				}
 			}
