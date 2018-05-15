@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -235,8 +236,68 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 	compareDirs(expected, actual)
 }
 
-func (s *SkeemaIntegrationSuite) VerifyInstance(t *testing.T) {
+func (s *SkeemaIntegrationSuite) ReinitAndVerify(t *testing.T, comparePath string) {
 	t.Helper()
 
-	// confirm empty diff of workspace dir vs instance. used for push, diff
+	if comparePath == "" {
+		comparePath = "../golden/init"
+	}
+	if err := os.RemoveAll("mydb"); err != nil {
+		t.Fatalf("Unable to clean directory: %s", err)
+	}
+	cfg := s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+	s.VerifyFiles(t, cfg, comparePath)
+}
+
+func (s *SkeemaIntegrationSuite) AssertExists(t *testing.T, schema, table, column string) {
+	t.Helper()
+	exists, phrase, err := s.objectExists(schema, table, column)
+	if err != nil {
+		t.Fatalf("Unexpected error checking existence of %s: %s", phrase, err)
+	}
+	if !exists {
+		t.Errorf("Expected %s to exist, but it does not", phrase)
+	}
+}
+
+func (s *SkeemaIntegrationSuite) AssertMissing(t *testing.T, schema, table, column string) {
+	t.Helper()
+	exists, phrase, err := s.objectExists(schema, table, column)
+	if err != nil {
+		t.Fatalf("Unexpected error checking existence of %s: %s", phrase, err)
+	}
+	if exists {
+		t.Errorf("Expected %s to not exist, but it does", phrase)
+	}
+}
+
+func (s *SkeemaIntegrationSuite) objectExists(schemaName, tableName, columnName string) (exists bool, phrase string, err error) {
+	if schemaName == "" || (tableName == "" && columnName != "") {
+		panic(errors.New("Invalid parameter combination"))
+	}
+	if tableName == "" && columnName == "" {
+		phrase = fmt.Sprintf("schema %s", schemaName)
+	} else if columnName == "" {
+		phrase = fmt.Sprintf("table %s.%s", schemaName, columnName)
+	} else {
+		phrase = fmt.Sprintf("column %s.%s.%s", schemaName, tableName, columnName)
+	}
+
+	schema, err := s.d.Schema(schemaName)
+	if tableName == "" && columnName == "" {
+		return schema != nil, phrase, err
+	} else if err != nil {
+		return false, phrase, fmt.Errorf("Unable to obtain %s: %s", phrase, err)
+	}
+
+	table, err := schema.Table(tableName)
+	if columnName == "" {
+		return table != nil, phrase, err
+	} else if err != nil {
+		return false, phrase, fmt.Errorf("Unable to obtain %s: %s", phrase, err)
+	}
+
+	columns := table.ColumnsByName()
+	_, exists = columns[columnName]
+	return exists, phrase, nil
 }
