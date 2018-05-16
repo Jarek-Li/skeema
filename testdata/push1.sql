@@ -4,6 +4,7 @@ CREATE TABLE widget_counts (
 	cnt int unsigned,
 	PRIMARY KEY (name)
 ) ENGINE=InnoDB;
+INSERT INTO widget_counts (name, cnt) VALUES ('foobar', 123);
 ALTER TABLE pageviews DROP COLUMN domain;
 ALTER TABLE activity ADD COLUMN rolled_up tinyint(1) unsigned NOT NULL;
 ALTER DATABASE analytics CHARACTER SET utf8 COLLATE utf8_swedish_ci;

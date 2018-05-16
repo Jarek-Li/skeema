@@ -236,7 +236,7 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 	compareDirs(expected, actual)
 }
 
-func (s *SkeemaIntegrationSuite) ReinitAndVerify(t *testing.T, comparePath string) {
+func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, comparePath string) {
 	t.Helper()
 
 	if comparePath == "" {
