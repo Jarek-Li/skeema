@@ -120,7 +120,7 @@ func (s *SkeemaIntegrationSuite) HandleCommand(t *testing.T, expectedExitCode in
 	} else if ev, ok := err.(*ExitValue); ok {
 		actualExitCode = ev.Code
 	} else {
-		t.Fatalf("Error return from `%s`: %s", fullCommandLine, err)
+		actualExitCode = CodeFatalError
 	}
 	if actualExitCode != expectedExitCode {
 		t.Fatalf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)

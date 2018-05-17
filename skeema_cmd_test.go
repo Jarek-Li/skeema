@@ -11,8 +11,72 @@ import (
 )
 
 func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
+	s.HandleCommand(t, CodeBadConfig, "skeema init") // no host
+
+	// Invalid environment name
+	s.HandleCommand(t, CodeBadConfig, "skeema init --dir mydb -h %s -P %d '[nope]'", s.d.Instance.Host, s.d.Instance.Port)
+
+	// Specifying a single schema that doesn't exist on the instance
+	s.HandleCommand(t, CodeBadConfig, "skeema init --dir mydb -h %s -P %d --schema doesntexist", s.d.Instance.Host, s.d.Instance.Port)
+
+	// Successful standard execution. Also confirm user is not persisted to .skeema
+	// since not specified on CLI.
 	cfg := s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 	s.VerifyFiles(t, cfg, "../golden/init")
+	dirSetsOption := func(path, option string, cfg *mybase.Config) bool {
+		t.Helper()
+		dir, err := NewDir(path, cfg)
+		if err != nil {
+			t.Fatalf("Unexpected error from NewDir: %s", err)
+		}
+		optionFile, err := dir.OptionFile()
+		if err != nil || optionFile == nil {
+			t.Fatalf("Unexpected error reading option file for %s: %s", dir, err)
+		}
+		_, setsOption := optionFile.OptionValue(option)
+		return setsOption
+	}
+	if dirSetsOption("mydb", "user", cfg) {
+		t.Error("Did not expect user to be persisted to .skeema, but it was")
+	}
+
+	// Specifying an unreachable host should fail with fatal error
+	s.HandleCommand(t, CodeFatalError, "skeema init --dir baddb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port-1)
+
+	// Test successful init with --user specified on CLI, persisting to .skeema
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema init --dir withuser -h %s -P %d --user root", s.d.Instance.Host, s.d.Instance.Port)
+	if !dirSetsOption("withuser", "user", cfg) {
+		t.Error("Expected user to be persisted to .skeema, but it was not")
+	}
+
+	// Can't init into a dir with existing option file
+	s.HandleCommand(t, CodeBadConfig, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+
+	// Can't init off of base dir that already specifies a schema
+	if err := os.Chdir("mydb/product"); err != nil {
+		t.Fatalf("Unable to cd to mydb/product: %s", err)
+	}
+	s.HandleCommand(t, CodeBadConfig, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+
+	// Test successful init for a single schema
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema init --dir combined -h %s -P %d --schema product", s.d.Instance.Host, s.d.Instance.Port)
+	dir, err := NewDir("combined", cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error from NewDir: %s", err)
+	}
+	if !dir.HasHost() || !dir.HasSchema() {
+		t.Error("Expected combined dir to have a .skeema defining both host and schema, but it does not")
+	}
+	if subdirs, err := dir.Subdirs(); err != nil {
+		t.Fatalf("Unexpected error listing subdirs of %s: %s", dir, err)
+	} else if len(subdirs) > 0 {
+		t.Errorf("Expected %s to have no subdirs, but it has %d", dir, len(subdirs))
+	}
+	if sqlFiles, err := dir.SQLFiles(); err != nil {
+		t.Fatalf("Unexpected error listing *.sql in %s: %s", dir, err)
+	} else if len(sqlFiles) < 1 {
+		t.Errorf("Expected %s to have *.sql files, but it does not", dir)
+	}
 }
 
 func (s *SkeemaIntegrationSuite) TestAddEnvHandler(t *testing.T) {
@@ -94,6 +158,18 @@ func (s *SkeemaIntegrationSuite) TestPullHandler(t *testing.T) {
 
 	cfg := s.HandleCommand(t, CodeSuccess, "skeema pull")
 	s.VerifyFiles(t, cfg, "../golden/pull1")
+
+	// Revert db back to previous state, and pull again to test the opposite
+	// behaviors: delete dir for new schema, remove charset/collation from .skeema,
+	// etc
+	if err := s.d.NukeData(); err != nil {
+		t.Fatalf("Unable to nuke data: %s", err)
+	}
+	if _, err := s.d.SourceSQL("../setup.sql"); err != nil {
+		t.Fatalf("Unable to source setup.sql: %s", err)
+	}
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema pull")
+	s.VerifyFiles(t, cfg, "../golden/init")
 }
 
 func (s *SkeemaIntegrationSuite) TestLintHandler(t *testing.T) {
