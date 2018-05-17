@@ -236,7 +236,7 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 	compareDirs(expected, actual)
 }
 
-func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, comparePath string) {
+func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, extraInitOpts, comparePath string) {
 	t.Helper()
 
 	if comparePath == "" {
@@ -245,7 +245,7 @@ func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, comparePath 
 	if err := os.RemoveAll("mydb"); err != nil {
 		t.Fatalf("Unable to clean directory: %s", err)
 	}
-	cfg := s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+	cfg := s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d %s", s.d.Instance.Host, s.d.Instance.Port, extraInitOpts)
 	s.VerifyFiles(t, cfg, comparePath)
 }
 
@@ -300,4 +300,17 @@ func (s *SkeemaIntegrationSuite) objectExists(schemaName, tableName, columnName 
 	columns := table.ColumnsByName()
 	_, exists = columns[columnName]
 	return exists, phrase, nil
+}
+
+func (s *SkeemaIntegrationSuite) execOrFatal(t *testing.T, schemaName, query string, args ...interface{}) {
+	t.Helper()
+	db, err := s.d.Connect(schemaName, "")
+	if err != nil {
+		t.Fatalf("Unable to connect to DockerizedInstance: %s", err)
+	}
+	_, err = db.Exec(query, args...)
+	if err != nil {
+		t.Fatalf("Error running query on DockerizedInstance.\nSchema: %s\nQuery: %s\nError: %s", schemaName, query, err)
+	}
+
 }

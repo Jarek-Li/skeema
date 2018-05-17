@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -163,6 +165,45 @@ func (s *SkeemaIntegrationSuite) TestLintHandler(t *testing.T) {
 	s.HandleCommand(t, CodeFatalError, "skeema lint")
 }
 
+func (s *SkeemaIntegrationSuite) TestDiffHandler(t *testing.T) {
+	s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+
+	// no-op diff should yield no differences
+	s.HandleCommand(t, CodeSuccess, "skeema diff")
+
+	// --host and --schema have no effect if supplied on CLI
+	s.HandleCommand(t, CodeSuccess, "skeema diff --host=1.2.3.4 --schema=whatever")
+
+	// It isn't possible to disable --dry-run with diff
+	cfg := s.HandleCommand(t, CodeSuccess, "skeema diff --skip-dry-run")
+	if !cfg.GetBool("dry-run") {
+		t.Error("Expected --skip-dry-run to have no effect on `skeema diff`, but it disabled dry-run")
+	}
+
+	s.execOrFatal(t, "analytics", "ALTER TABLE pageviews DROP COLUMN domain")
+	s.HandleCommand(t, CodeDifferencesFound, "skeema diff")
+
+	// Confirm --brief works as expected
+	oldStdout := os.Stdout
+	if outFile, err := os.Create("diff-brief.out"); err != nil {
+		t.Fatalf("Unable to redirect stdout to a file: %s", err)
+	} else {
+		os.Stdout = outFile
+		s.HandleCommand(t, CodeDifferencesFound, "skeema diff --brief")
+		outFile.Close()
+		os.Stdout = oldStdout
+		expectOut := fmt.Sprintf("%s\n", s.d.Instance)
+		if actualOut, err := ioutil.ReadFile("diff-brief.out"); err != nil {
+			t.Fatalf("Unable to read diff-brief.out: %s", err)
+		} else if string(actualOut) != expectOut {
+			t.Errorf("Unexpected output from `skeema diff --brief`\nExpected:\n%sActual:\n%s", expectOut, string(actualOut))
+		}
+		if err := os.Remove("diff-brief.out"); err != nil {
+			t.Fatalf("Unable to delete diff-brief.out: %s", err)
+		}
+	}
+}
+
 func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 	s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 
@@ -173,7 +214,7 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 		t.Fatalf("Unable to nuke data: %s", err)
 	}
 	s.HandleCommand(t, CodeSuccess, "skeema push")
-	s.ReinitAndVerifyFiles(t, "")
+	s.ReinitAndVerifyFiles(t, "", "")
 
 	// Test bad option values
 	s.HandleCommand(t, CodeBadConfig, "skeema push --concurrent-instances=0")
@@ -238,4 +279,39 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 	s.AssertExists(t, "analytics", "pageviews", "domain")
 	s.AssertExists(t, "bonus", "placeholder", "")
 
+}
+
+func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
+	// Insert 2 rows into product.users, so that next auto-inc value is now 3
+	s.execOrFatal(t, "product", "INSERT INTO users (name) VALUES (?), (?)", "foo", "bar")
+
+	// Normal init omits auto-inc values. diff views this as no differences.
+	s.ReinitAndVerifyFiles(t, "", "")
+	s.HandleCommand(t, CodeSuccess, "skeema diff")
+
+	// pull and lint should make no changes
+	cfg := s.HandleCommand(t, CodeSuccess, "skeema pull")
+	s.VerifyFiles(t, cfg, "../golden/init")
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema lint")
+	s.VerifyFiles(t, cfg, "../golden/init")
+
+	// pull with --include-auto-inc should include auto-inc values greater than 1
+	cfg = s.HandleCommand(t, CodeSuccess, "skeema pull --include-auto-inc")
+	s.VerifyFiles(t, cfg, "../golden/autoinc")
+	s.HandleCommand(t, CodeSuccess, "skeema diff")
+
+	// Inserting another row should still be ignored by diffs
+	s.execOrFatal(t, "product", "INSERT INTO users (name) VALUES (?)", "something")
+	s.HandleCommand(t, CodeSuccess, "skeema diff")
+
+	// However, if table's next auto-inc is LOWER than sqlfile's, this is a
+	// difference.
+	s.execOrFatal(t, "product", "DELETE FROM users WHERE id > 1")
+	s.execOrFatal(t, "product", "ALTER TABLE users AUTO_INCREMENT=2")
+	s.HandleCommand(t, CodeDifferencesFound, "skeema diff")
+	s.HandleCommand(t, CodeSuccess, "skeema push")
+	s.HandleCommand(t, CodeSuccess, "skeema diff")
+
+	// init with --include-auto-inc should include auto-inc values greater than 1
+	s.ReinitAndVerifyFiles(t, "--include-auto-inc", "../golden/autoinc")
 }
