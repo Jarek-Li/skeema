@@ -315,3 +315,21 @@ func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
 	// init with --include-auto-inc should include auto-inc values greater than 1
 	s.ReinitAndVerifyFiles(t, "--include-auto-inc", "../golden/autoinc")
 }
+
+func (s *SkeemaIntegrationSuite) TestUnsupportedAlter(t *testing.T) {
+	s.execOrFatal(t, "product", "ALTER TABLE posts ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8")
+
+	// init should work fine with an unsupported table
+	s.ReinitAndVerifyFiles(t, "", "../golden/unsupported")
+
+	// Back to clean slate
+	if err := s.d.NukeData(); err != nil {
+		t.Fatalf("Unable to clean slate: %s", err)
+	}
+	if _, err := s.d.SourceSQL("../setup.sql"); err != nil {
+		t.Fatalf("Unable to re-source setup.sql: %s", err)
+	}
+	s.ReinitAndVerifyFiles(t, "", "../golden/init")
+
+	// TODO: alter/add/drop; pull; diff; push; lint
+}
