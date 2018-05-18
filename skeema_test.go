@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,13 +45,13 @@ func TestIntegration(t *testing.T) {
 }
 
 type SkeemaIntegrationSuite struct {
-	d   *tengo.DockerizedInstance
-	pwd string
+	d        *tengo.DockerizedInstance
+	repoPath string
 }
 
 func (s *SkeemaIntegrationSuite) Setup(backend string) (err error) {
 	// Remember working directory, which should be the base dir for the repo
-	s.pwd, err = os.Getwd()
+	s.repoPath, err = os.Getwd()
 	if err != nil {
 		return err
 	}
@@ -68,48 +69,66 @@ func (s *SkeemaIntegrationSuite) Teardown(backend string) error {
 	if err := s.d.Destroy(); err != nil {
 		return err
 	}
-	if err := os.Chdir(s.pwd); err != nil {
+	if err := os.Chdir(s.repoPath); err != nil {
 		return err
 	}
-	if err := os.RemoveAll("testdata/.tmpworkspace"); err != nil {
+	if err := os.RemoveAll(s.workspace()); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (s *SkeemaIntegrationSuite) BeforeTest(method string, backend string) error {
-	// Return to original dir
-	if err := os.Chdir(s.pwd); err != nil {
-		return err
-	}
-
 	// Clear data and re-source setup data
 	if err := s.d.NukeData(); err != nil {
 		return err
 	}
-	if _, err := s.d.SourceSQL("testdata/setup.sql"); err != nil {
+	if _, err := s.d.SourceSQL(s.testdata("setup.sql")); err != nil {
 		return err
 	}
 
 	// Create or recreate workspace dir
-	if _, err := os.Stat("testdata/.tmpworkspace"); err == nil { // dir exists
-		if err := os.RemoveAll("testdata/.tmpworkspace"); err != nil {
+	if _, err := os.Stat(s.workspace()); err == nil { // dir exists
+		if err := os.RemoveAll(s.workspace()); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll("testdata/.tmpworkspace", 0777); err != nil {
+	if err := os.MkdirAll(s.workspace(), 0777); err != nil {
 		return err
 	}
-	if err := os.Chdir("testdata/.tmpworkspace"); err != nil {
+	if err := os.Chdir(s.workspace()); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// HandleCommand exuctes the supplied Skeema command-line, and confirms its exit
+// testdata returns the absolute path of the testdata dir, or a file or dir
+// based from it
+func (s *SkeemaIntegrationSuite) testdata(joins ...string) string {
+	parts := append([]string{s.repoPath, "testdata"}, joins...)
+	return filepath.Join(parts...)
+}
+
+// workspace returns the workspace directory for tests to write temporary files
+// to.
+func (s *SkeemaIntegrationSuite) workspace() string {
+	return s.testdata(".tmpworkspace")
+}
+
+// handleCommand executes the supplied Skeema command-line, and confirms its exit
 // code matches the expected value.
-func (s *SkeemaIntegrationSuite) HandleCommand(t *testing.T, expectedExitCode int, commandLine string, a ...interface{}) *mybase.Config {
+// pwd can specify a relative path (based off of testdata/.tmpworkspace) to
+// execute the command from the designated subdirectory. Afterwards, the pwd
+// will be restored to testdata/.tmpworkspace regardless.
+func (s *SkeemaIntegrationSuite) handleCommand(t *testing.T, expectedExitCode int, pwd, commandLine string, a ...interface{}) *mybase.Config {
+	t.Helper()
+
+	path := filepath.Join(s.workspace(), pwd)
+	if err := os.Chdir(path); err != nil {
+		t.Fatalf("Unable to cd to %s: %s", path, err)
+	}
+
 	fullCommandLine := fmt.Sprintf(commandLine, a...)
 	fakeFileSource := mybase.SimpleSource(map[string]string{"password": s.d.Instance.Password})
 	cfg := mybase.ParseFakeCLI(t, CommandSuite, fullCommandLine, fakeFileSource)
@@ -125,12 +144,17 @@ func (s *SkeemaIntegrationSuite) HandleCommand(t *testing.T, expectedExitCode in
 	if actualExitCode != expectedExitCode {
 		t.Fatalf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)
 	}
+	if pwd != "" && pwd != "." {
+		if err := os.Chdir(s.workspace()); err != nil {
+			t.Fatalf("Unable to cd to %s: %s", s.workspace(), err)
+		}
+	}
 	return cfg
 }
 
-// VerifyFiles compares the files in testdata/.tmpworkspace to the files in the
+// verifyFiles compares the files in testdata/.tmpworkspace to the files in the
 // specified dir, and fails the test if any differences are found.
-func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, dirExpectedBase string) {
+func (s *SkeemaIntegrationSuite) verifyFiles(t *testing.T, cfg *mybase.Config, dirExpectedBase string) {
 	t.Helper()
 
 	var compareDirs func(*Dir, *Dir)
@@ -229,14 +253,14 @@ func (s *SkeemaIntegrationSuite) VerifyFiles(t *testing.T, cfg *mybase.Config, d
 	if err != nil {
 		t.Fatalf("NewDir(%s) returned %s", dirExpectedBase, err)
 	}
-	actual, err := NewDir(filepath.Join(s.pwd, "testdata/.tmpworkspace"), cfg)
+	actual, err := NewDir(s.workspace(), cfg)
 	if err != nil {
-		t.Fatalf("NewDir(%s) returned %s", filepath.Join(s.pwd, "testdata/.tmpworkspace"), err)
+		t.Fatalf("NewDir(%s) returned %s", s.workspace(), err)
 	}
 	compareDirs(expected, actual)
 }
 
-func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, extraInitOpts, comparePath string) {
+func (s *SkeemaIntegrationSuite) reinitAndVerifyFiles(t *testing.T, extraInitOpts, comparePath string) {
 	t.Helper()
 
 	if comparePath == "" {
@@ -245,11 +269,11 @@ func (s *SkeemaIntegrationSuite) ReinitAndVerifyFiles(t *testing.T, extraInitOpt
 	if err := os.RemoveAll("mydb"); err != nil {
 		t.Fatalf("Unable to clean directory: %s", err)
 	}
-	cfg := s.HandleCommand(t, CodeSuccess, "skeema init --dir mydb -h %s -P %d %s", s.d.Instance.Host, s.d.Instance.Port, extraInitOpts)
-	s.VerifyFiles(t, cfg, comparePath)
+	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema init --dir mydb -h %s -P %d %s", s.d.Instance.Host, s.d.Instance.Port, extraInitOpts)
+	s.verifyFiles(t, cfg, comparePath)
 }
 
-func (s *SkeemaIntegrationSuite) AssertExists(t *testing.T, schema, table, column string) {
+func (s *SkeemaIntegrationSuite) assertExists(t *testing.T, schema, table, column string) {
 	t.Helper()
 	exists, phrase, err := s.objectExists(schema, table, column)
 	if err != nil {
@@ -260,7 +284,7 @@ func (s *SkeemaIntegrationSuite) AssertExists(t *testing.T, schema, table, colum
 	}
 }
 
-func (s *SkeemaIntegrationSuite) AssertMissing(t *testing.T, schema, table, column string) {
+func (s *SkeemaIntegrationSuite) assertMissing(t *testing.T, schema, table, column string) {
 	t.Helper()
 	exists, phrase, err := s.objectExists(schema, table, column)
 	if err != nil {
@@ -302,6 +326,8 @@ func (s *SkeemaIntegrationSuite) objectExists(schemaName, tableName, columnName 
 	return exists, phrase, nil
 }
 
+// execOrFatal runs the specified SQL DML or DDL in the specified schema. If
+// something goes wrong, it is fatal to the current test.
 func (s *SkeemaIntegrationSuite) execOrFatal(t *testing.T, schemaName, query string, args ...interface{}) {
 	t.Helper()
 	db, err := s.d.Connect(schemaName, "")
@@ -312,5 +338,38 @@ func (s *SkeemaIntegrationSuite) execOrFatal(t *testing.T, schemaName, query str
 	if err != nil {
 		t.Fatalf("Error running query on DockerizedInstance.\nSchema: %s\nQuery: %s\nError: %s", schemaName, query, err)
 	}
+}
 
+// readFile wraps ioutil.ReadFile, with any errors being fatal to the test.
+func readFile(t *testing.T, filename string) string {
+	t.Helper()
+	contents, err := ioutil.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Unable to read %s: %s", filename, err)
+	}
+	return string(contents)
+}
+
+// writeFile wraps ioutil.WriteFile, with any errors being fatal to the test.
+func writeFile(t *testing.T, filename, contents string) {
+	t.Helper()
+	err := ioutil.WriteFile(filename, []byte(contents), 0777)
+	if err != nil {
+		t.Fatalf("Unable to write %s: %s", filename, err)
+	}
+}
+
+// getOptionFile returns a mybase.File representing the .skeema file in the
+// specified directory
+func getOptionFile(t *testing.T, basePath string, baseConfig *mybase.Config) *mybase.File {
+	t.Helper()
+	dir, err := NewDir(basePath, baseConfig)
+	if err != nil {
+		t.Fatalf("Unable to obtain directory %s: %s", basePath, err)
+	}
+	file, err := dir.OptionFile()
+	if err != nil {
+		t.Fatalf("Unable to obtain %s/.skeema: %s", basePath, err)
+	}
+	return file
 }
