@@ -80,9 +80,8 @@ The following features are completely ignored by Skeema. Their presence in a sch
 Skeema can CREATE or DROP tables using these features, but cannot ALTER them. The output of `skeema diff` and `skeema push` will note that it cannot generate or run ALTER TABLE for tables using these features, so the affected table(s) will be skipped, but the rest of the operation will proceed as normal. 
 
 * foreign keys
-* compressed tables
 * partitioned tables
-* non-InnoDB storage engines
+* some features of non-InnoDB storage engines
 * fulltext indexes
 * spatial types
 * generated/virtual columns (MySQL 5.7+)

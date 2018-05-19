@@ -302,7 +302,7 @@ func (s *SkeemaIntegrationSuite) objectExists(schemaName, tableName, columnName 
 	if tableName == "" && columnName == "" {
 		phrase = fmt.Sprintf("schema %s", schemaName)
 	} else if columnName == "" {
-		phrase = fmt.Sprintf("table %s.%s", schemaName, columnName)
+		phrase = fmt.Sprintf("table %s.%s", schemaName, tableName)
 	} else {
 		phrase = fmt.Sprintf("column %s.%s.%s", schemaName, tableName, columnName)
 	}
@@ -326,9 +326,32 @@ func (s *SkeemaIntegrationSuite) objectExists(schemaName, tableName, columnName 
 	return exists, phrase, nil
 }
 
-// execOrFatal runs the specified SQL DML or DDL in the specified schema. If
+// sourceSQL wraps tengo.DockerizedInstance.SourceSQL. If an error occurs, it is
+// fatal to the test. filePath should be a relative path based from testdata/.
+func (s *SkeemaIntegrationSuite) sourceSQL(t *testing.T, filePath string) {
+	t.Helper()
+	filePath = filepath.Join("..", filePath)
+	if _, err := s.d.SourceSQL(filePath); err != nil {
+		t.Fatalf("Unable to source %s: %s", filePath, err)
+	}
+}
+
+// cleanData wraps tengo.DockerizedInstance.NukeData. If an error occurs, it is
+// fatal to the test. To automatically source one or more *.sql files after
+// nuking the data, supply relative file paths as args.
+func (s *SkeemaIntegrationSuite) cleanData(t *testing.T, sourceAfter ...string) {
+	t.Helper()
+	if err := s.d.NukeData(); err != nil {
+		t.Fatalf("Unable to clear database state: %s", err)
+	}
+	for _, filePath := range sourceAfter {
+		s.sourceSQL(t, filePath)
+	}
+}
+
+// dbExec runs the specified SQL DML or DDL in the specified schema. If
 // something goes wrong, it is fatal to the current test.
-func (s *SkeemaIntegrationSuite) execOrFatal(t *testing.T, schemaName, query string, args ...interface{}) {
+func (s *SkeemaIntegrationSuite) dbExec(t *testing.T, schemaName, query string, args ...interface{}) {
 	t.Helper()
 	db, err := s.d.Connect(schemaName, "")
 	if err != nil {
@@ -337,6 +360,11 @@ func (s *SkeemaIntegrationSuite) execOrFatal(t *testing.T, schemaName, query str
 	_, err = db.Exec(query, args...)
 	if err != nil {
 		t.Fatalf("Error running query on DockerizedInstance.\nSchema: %s\nQuery: %s\nError: %s", schemaName, query, err)
+	}
+	if schemaName != "" {
+		if schema, err := s.d.Schema(schemaName); err == nil {
+			schema.PurgeTableCache()
+		}
 	}
 }
 

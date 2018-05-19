@@ -4,4 +4,7 @@ CREATE TABLE `subscriptions` (
   `subscribed_at` int(10) unsigned DEFAULT NULL,
   PRIMARY KEY (`post_id`,`user_id`),
   KEY `user_post` (`user_id`,`post_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+) ENGINE=InnoDB DEFAULT CHARSET=latin1
+/*!50100 PARTITION BY RANGE (user_id)
+(PARTITION p0 VALUES LESS THAN (123) ENGINE = InnoDB,
+ PARTITION p1 VALUES LESS THAN MAXVALUE ENGINE = InnoDB) */;

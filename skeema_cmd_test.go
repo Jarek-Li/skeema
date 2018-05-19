@@ -46,9 +46,7 @@ func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
 	// Test successful init for a single schema. Source a SQL file first that,
 	// among other things, changes the default charset and collation for the
 	// schema in question.
-	if _, err := s.d.SourceSQL("../push1.sql"); err != nil {
-		t.Fatalf("Unable to setup test: %s", err)
-	}
+	s.sourceSQL(t, "push1.sql")
 	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema init --dir combined -h %s -P %d --schema analytics", s.d.Instance.Host, s.d.Instance.Port)
 	dir, err := NewDir("combined", cfg)
 	if err != nil {
@@ -158,22 +156,14 @@ func (s *SkeemaIntegrationSuite) TestPullHandler(t *testing.T) {
 	// In product db, alter one table and drop one table;
 	// In analytics db, add one table and alter the schema's charset and collation;
 	// Create a new db and put one table in it
-	if _, err := s.d.SourceSQL("../pull1.sql"); err != nil {
-		t.Fatalf("Unable to setup test: %s", err)
-	}
-
+	s.sourceSQL(t, "pull1.sql")
 	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema pull")
 	s.verifyFiles(t, cfg, "../golden/pull1")
 
 	// Revert db back to previous state, and pull again to test the opposite
 	// behaviors: delete dir for new schema, remove charset/collation from .skeema,
 	// etc
-	if err := s.d.NukeData(); err != nil {
-		t.Fatalf("Unable to nuke data: %s", err)
-	}
-	if _, err := s.d.SourceSQL("../setup.sql"); err != nil {
-		t.Fatalf("Unable to source setup.sql: %s", err)
-	}
+	s.cleanData(t, "setup.sql")
 	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema pull")
 	s.verifyFiles(t, cfg, "../golden/init")
 }
@@ -262,7 +252,7 @@ func (s *SkeemaIntegrationSuite) TestDiffHandler(t *testing.T) {
 		t.Error("Expected --skip-dry-run to have no effect on `skeema diff`, but it disabled dry-run")
 	}
 
-	s.execOrFatal(t, "analytics", "ALTER TABLE pageviews DROP COLUMN domain")
+	s.dbExec(t, "analytics", "ALTER TABLE pageviews DROP COLUMN domain")
 	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff")
 
 	// Confirm --brief works as expected
@@ -292,9 +282,7 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 	// Verify clean-slate operation: wipe the DB; push; wipe the files; re-init
 	// the files; verify the files match. The push inherently verifies creation of
 	// schemas and tables.
-	if err := s.d.NukeData(); err != nil {
-		t.Fatalf("Unable to nuke data: %s", err)
-	}
+	s.cleanData(t)
 	s.handleCommand(t, CodeSuccess, ".", "skeema push")
 	s.reinitAndVerifyFiles(t, "", "")
 
@@ -307,9 +295,7 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 	// Make some changes on the db side, so that our next successful push attempt
 	// will include dropping a table, dropping a col, adding a col, changing db
 	// charset and collation
-	if _, err := s.d.SourceSQL("../push1.sql"); err != nil {
-		t.Fatalf("Unable to setup test: %s", err)
-	}
+	s.sourceSQL(t, "push1.sql")
 
 	// push1.sql intentionally included no changes to the `product` schema, so push
 	// from there should succeed and not impact anything in `analytics`
@@ -358,7 +344,7 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 
 func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
 	// Insert 2 rows into product.users, so that next auto-inc value is now 3
-	s.execOrFatal(t, "product", "INSERT INTO users (name) VALUES (?), (?)", "foo", "bar")
+	s.dbExec(t, "product", "INSERT INTO users (name) VALUES (?), (?)", "foo", "bar")
 
 	// Normal init omits auto-inc values. diff views this as no differences.
 	s.reinitAndVerifyFiles(t, "", "")
@@ -376,13 +362,13 @@ func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
 	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
 
 	// Inserting another row should still be ignored by diffs
-	s.execOrFatal(t, "product", "INSERT INTO users (name) VALUES (?)", "something")
+	s.dbExec(t, "product", "INSERT INTO users (name) VALUES (?)", "something")
 	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
 
 	// However, if table's next auto-inc is LOWER than sqlfile's, this is a
 	// difference.
-	s.execOrFatal(t, "product", "DELETE FROM users WHERE id > 1")
-	s.execOrFatal(t, "product", "ALTER TABLE users AUTO_INCREMENT=2")
+	s.dbExec(t, "product", "DELETE FROM users WHERE id > 1")
+	s.dbExec(t, "product", "ALTER TABLE users AUTO_INCREMENT=2")
 	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff")
 	s.handleCommand(t, CodeSuccess, ".", "skeema push")
 	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
@@ -392,19 +378,45 @@ func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
 }
 
 func (s *SkeemaIntegrationSuite) TestUnsupportedAlter(t *testing.T) {
-	s.execOrFatal(t, "product", "ALTER TABLE posts ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8")
+	s.sourceSQL(t, "unsupported1.sql")
 
 	// init should work fine with an unsupported table
 	s.reinitAndVerifyFiles(t, "", "../golden/unsupported")
 
-	// Back to clean slate
-	if err := s.d.NukeData(); err != nil {
-		t.Fatalf("Unable to clean slate: %s", err)
-	}
-	if _, err := s.d.SourceSQL("../setup.sql"); err != nil {
-		t.Fatalf("Unable to re-source setup.sql: %s", err)
-	}
+	// Back to clean slate for db and files
+	s.cleanData(t, "setup.sql")
 	s.reinitAndVerifyFiles(t, "", "../golden/init")
 
-	// TODO: alter/add/drop; pull; diff; push; lint
+	// apply change to db directly, and confirm pull still works
+	s.sourceSQL(t, "unsupported1.sql")
+	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema pull")
+	s.verifyFiles(t, cfg, "../golden/unsupported")
+
+	// back to clean slate for db only
+	s.cleanData(t, "setup.sql")
+
+	// lint should be able to fix formatting problems in unsupported table files
+	contents := readFile(t, "mydb/product/subscriptions.sql")
+	writeFile(t, "mydb/product/subscriptions.sql", strings.Replace(contents, "`", "", -1))
+	s.handleCommand(t, CodeDifferencesFound, ".", "skeema lint")
+	s.verifyFiles(t, cfg, "../golden/unsupported")
+
+	// diff should return CodeDifferencesFound, vs push should return
+	// CodePartialError
+	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff --debug")
+	s.handleCommand(t, CodePartialError, ".", "skeema push")
+
+	// diff/push still ok if *creating* or *dropping* unsupported table
+	s.dbExec(t, "product", "DROP TABLE subscriptions")
+	s.assertMissing(t, "product", "subscriptions", "")
+	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff")
+	s.handleCommand(t, CodeSuccess, ".", "skeema push")
+	s.assertExists(t, "product", "subscriptions", "")
+	s.sourceSQL(t, "unsupported1.sql")
+	if err := os.Remove("mydb/product/subscriptions.sql"); err != nil {
+		t.Fatalf("Unexpected error removing a file: %s", err)
+	}
+	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff --allow-unsafe")
+	s.handleCommand(t, CodeSuccess, ".", "skeema push --allow-unsafe")
+	s.assertMissing(t, "product", "subscriptions", "")
 }
