@@ -28,6 +28,9 @@ func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
 	// Specifying an unreachable host should fail with fatal error
 	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir baddb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port-100)
 
+	// host-wrapper with no output should fail
+	s.handleCommand(t, CodeBadConfig, ".", "skeema init --dir baddb -h xyz --host-wrapper='echo'")
+
 	// Test successful init with --user specified on CLI, persisting to .skeema
 	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema init --dir withuser -h %s -P %d --user root", s.d.Instance.Host, s.d.Instance.Port)
 	if _, setsOption := getOptionFile(t, "withuser", cfg).OptionValue("user"); !setsOption {
@@ -40,14 +43,22 @@ func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
 	// Can't init off of base dir that already specifies a schema
 	s.handleCommand(t, CodeBadConfig, "mydb/product", "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 
-	// Test successful init for a single schema
-	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema init --dir combined -h %s -P %d --schema product", s.d.Instance.Host, s.d.Instance.Port)
+	// Test successful init for a single schema. Source a SQL file first that,
+	// among other things, changes the default charset and collation for the
+	// schema in question.
+	if _, err := s.d.SourceSQL("../push1.sql"); err != nil {
+		t.Fatalf("Unable to setup test: %s", err)
+	}
+	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema init --dir combined -h %s -P %d --schema analytics", s.d.Instance.Host, s.d.Instance.Port)
 	dir, err := NewDir("combined", cfg)
 	if err != nil {
 		t.Fatalf("Unexpected error from NewDir: %s", err)
 	}
-	if !dir.HasHost() || !dir.HasSchema() {
-		t.Error("Expected combined dir to have a .skeema defining both host and schema, but it does not")
+	optionFile := getOptionFile(t, "combined", cfg)
+	for _, option := range []string{"host", "schema", "default-character-set", "default-collation"} {
+		if _, setsOption := optionFile.OptionValue(option); !setsOption {
+			t.Errorf("Expected .skeema to contain %s, but it does not", option)
+		}
 	}
 	if subdirs, err := dir.Subdirs(); err != nil {
 		t.Fatalf("Unexpected error listing subdirs of %s: %s", dir, err)
@@ -59,6 +70,32 @@ func (s *SkeemaIntegrationSuite) TestInitHandler(t *testing.T) {
 	} else if len(sqlFiles) < 1 {
 		t.Errorf("Expected %s to have *.sql files, but it does not", dir)
 	}
+
+	// Test successful init without a --dir
+	expectDir := fmt.Sprintf("%s:%d", s.d.Instance.Host, s.d.Instance.Port)
+	if _, err = os.Stat(expectDir); err == nil {
+		t.Fatalf("Expected dir %s to not exist yet, but it does", expectDir)
+	}
+	s.handleCommand(t, CodeSuccess, ".", "skeema init -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+	if _, err = os.Stat(expectDir); err != nil {
+		t.Fatalf("Expected dir %s to exist now, but it does not", expectDir)
+	}
+
+	// init should fail if a parent dir has an invalid .skeema file
+	makeDir(t, "hasbadoptions")
+	writeFile(t, "hasbadoptions/.skeema", "invalid file will not parse")
+	s.handleCommand(t, CodeFatalError, "hasbadoptions", "skeema init -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+
+	// init should fail if the --dir specifies an existing non-directory file; or
+	// if the --dir already contains a subdir matching a schema name; or if the
+	// --dir already contains a .sql file and --schema was used to only do 1 level
+	writeFile(t, "nondir", "foo bar")
+	s.handleCommand(t, CodeCantCreate, ".", "skeema init --dir nondir -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+	makeDir(t, "alreadyexists/product")
+	s.handleCommand(t, CodeCantCreate, ".", "skeema init --dir alreadyexists -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+	makeDir(t, "hassql")
+	writeFile(t, "hassql/foo.sql", "foo")
+	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir hassql --schema product -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
 }
 
 func (s *SkeemaIntegrationSuite) TestAddEnvHandler(t *testing.T) {

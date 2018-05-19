@@ -359,6 +359,14 @@ func writeFile(t *testing.T, filename, contents string) {
 	}
 }
 
+// makeDir wraps os.MkdirAll, with any errors being fatal to the test.
+func makeDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0777); err != nil {
+		t.Fatalf("Unable to create dir: %s", err)
+	}
+}
+
 // getOptionFile returns a mybase.File representing the .skeema file in the
 // specified directory
 func getOptionFile(t *testing.T, basePath string, baseConfig *mybase.Config) *mybase.File {
