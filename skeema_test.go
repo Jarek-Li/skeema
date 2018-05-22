@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
-	log "github.com/sirupsen/logrus"
 	"github.com/skeema/mybase"
 	"github.com/skeema/tengo"
 )
@@ -21,12 +19,6 @@ func TestMain(m *testing.M) {
 	// Suppress packet error output when attempting to connect to a Dockerized
 	// mysql-server which is still starting up
 	tengo.UseFilteredDriverLogger()
-
-	// Omit skeema output unless running test with verbose flag
-	flag.Parse()
-	if !testing.Verbose() {
-		log.SetLevel(log.PanicLevel)
-	}
 
 	// Add global options to the global command suite, just like in main()
 	AddGlobalOptions(CommandSuite)
@@ -381,6 +373,14 @@ func readFile(t *testing.T, filename string) string {
 // writeFile wraps ioutil.WriteFile, with any errors being fatal to the test.
 func writeFile(t *testing.T, filename, contents string) {
 	t.Helper()
+	dirPath := filepath.Dir(filename)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		err = os.MkdirAll(dirPath, 0777)
+		if err != nil {
+			t.Fatalf("Unable to create directory %s: %s", dirPath, err)
+		}
+	}
+
 	err := ioutil.WriteFile(filename, []byte(contents), 0777)
 	if err != nil {
 		t.Fatalf("Unable to write %s: %s", filename, err)

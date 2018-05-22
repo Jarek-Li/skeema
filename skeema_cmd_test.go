@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -166,6 +165,12 @@ func (s *SkeemaIntegrationSuite) TestPullHandler(t *testing.T) {
 	s.cleanData(t, "setup.sql")
 	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema pull")
 	s.verifyFiles(t, cfg, "../golden/init")
+
+	// Files with invalid SQL should still be corrected upon pull
+	contents := readFile(t, "mydb/product/comments.sql")
+	writeFile(t, "mydb/product/comments.sql", strings.Replace(contents, "DEFAULT", "DEFALUT", 1))
+	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema pull")
+	s.verifyFiles(t, cfg, "../golden/init")
 }
 
 func (s *SkeemaIntegrationSuite) TestLintHandler(t *testing.T) {
@@ -265,10 +270,9 @@ func (s *SkeemaIntegrationSuite) TestDiffHandler(t *testing.T) {
 		outFile.Close()
 		os.Stdout = oldStdout
 		expectOut := fmt.Sprintf("%s\n", s.d.Instance)
-		if actualOut, err := ioutil.ReadFile("diff-brief.out"); err != nil {
-			t.Fatalf("Unable to read diff-brief.out: %s", err)
-		} else if string(actualOut) != expectOut {
-			t.Errorf("Unexpected output from `skeema diff --brief`\nExpected:\n%sActual:\n%s", expectOut, string(actualOut))
+		actualOut := readFile(t, "diff-brief.out")
+		if actualOut != expectOut {
+			t.Errorf("Unexpected output from `skeema diff --brief`\nExpected:\n%sActual:\n%s", expectOut, actualOut)
 		}
 		if err := os.Remove("diff-brief.out"); err != nil {
 			t.Fatalf("Unable to delete diff-brief.out: %s", err)
@@ -340,6 +344,19 @@ func (s *SkeemaIntegrationSuite) TestPushHandler(t *testing.T) {
 	s.assertMissing(t, "analytics", "activity", "rolled_up")
 	s.assertExists(t, "analytics", "pageviews", "domain")
 	s.assertExists(t, "bonus", "placeholder", "")
+
+	// invalid SQL prevents push from working in an entire dir, but not in a
+	// dir for a different schema
+	contents := readFile(t, "mydb/product/comments.sql")
+	writeFile(t, "mydb/product/comments.sql", strings.Replace(contents, "PRIMARY KEY", "foo int,\nPRIMARY KEY", 1))
+	contents = readFile(t, "mydb/product/users.sql")
+	writeFile(t, "mydb/product/users.sql", strings.Replace(contents, "PRIMARY KEY", "foo int INVALID SQL HERE,\nPRIMARY KEY", 1))
+	writeFile(t, "mydb/bonus/.skeema", "schema=bonus\n")
+	writeFile(t, "mydb/bonus/table2.sql", "CREATE TABLE table2 (name varchar(20) NOT NULL, PRIMARY KEY (name))")
+	s.handleCommand(t, CodeFatalError, ".", "skeema push")
+	s.assertMissing(t, "product", "comments", "foo")
+	s.assertMissing(t, "product", "users", "foo")
+	s.assertExists(t, "bonus", "table2", "")
 }
 
 func (s *SkeemaIntegrationSuite) TestAutoInc(t *testing.T) {
@@ -389,7 +406,7 @@ func (s *SkeemaIntegrationSuite) TestUnsupportedAlter(t *testing.T) {
 
 	// apply change to db directly, and confirm pull still works
 	s.sourceSQL(t, "unsupported1.sql")
-	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema pull")
+	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema pull --debug")
 	s.verifyFiles(t, cfg, "../golden/unsupported")
 
 	// back to clean slate for db only
@@ -412,7 +429,6 @@ func (s *SkeemaIntegrationSuite) TestUnsupportedAlter(t *testing.T) {
 	s.handleCommand(t, CodeDifferencesFound, ".", "skeema diff")
 	s.handleCommand(t, CodeSuccess, ".", "skeema push")
 	s.assertExists(t, "product", "subscriptions", "")
-	s.sourceSQL(t, "unsupported1.sql")
 	if err := os.Remove("mydb/product/subscriptions.sql"); err != nil {
 		t.Fatalf("Unexpected error removing a file: %s", err)
 	}
