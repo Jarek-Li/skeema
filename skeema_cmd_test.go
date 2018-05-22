@@ -436,3 +436,48 @@ func (s *SkeemaIntegrationSuite) TestUnsupportedAlter(t *testing.T) {
 	s.handleCommand(t, CodeSuccess, ".", "skeema push --allow-unsafe")
 	s.assertMissing(t, "product", "subscriptions", "")
 }
+
+func (s *SkeemaIntegrationSuite) TestIgnoreOptions(t *testing.T) {
+	s.sourceSQL(t, "ignore1.sql")
+
+	// init: valid regexes should work properly and persist to option files
+	cfg := s.handleCommand(t, CodeSuccess, ".", "skeema init --dir mydb -h %s -P %d --ignore-schema='^archives$' --ignore-table='^_'", s.d.Instance.Host, s.d.Instance.Port)
+	s.verifyFiles(t, cfg, "../golden/ignore")
+
+	// pull: nothing should be updated due to ignore options
+	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema pull")
+	s.verifyFiles(t, cfg, "../golden/ignore")
+
+	// diff/push: no differences. This should still be the case even if we add a
+	// file corresponding to an ignored table, with a different definition than
+	// the db has.
+	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
+	writeFile(t, "mydb/product/_widgets.sql", "CREATE TABLE _widgets (id int) ENGINE=InnoDB;\n")
+	writeFile(t, "mydb/analytics/_newtable.sql", "CREATE TABLE _newtable (id int) ENGINE=InnoDB;\n")
+	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
+
+	// lint: ignored schemas and tables should be ignored
+	// To set up this test, we do a pull that overrides the previous ignore options
+	// and then edit those files so that they contain formatting mistakes or even
+	// invalid SQL.
+	cfg = s.handleCommand(t, CodeSuccess, ".", "skeema pull --ignore-schema='' --ignore-table=''")
+	contents := readFile(t, "mydb/analytics/_trending.sql")
+	newContents := strings.Replace(contents, "`", "", -1)
+	writeFile(t, "mydb/analytics/_trending.sql", newContents)
+	writeFile(t, "mydb/archives/bar.sql", "CREATE TABLE bar (this is not valid SQL whatever)")
+	s.handleCommand(t, CodeSuccess, ".", "skeema lint")
+	if readFile(t, "mydb/analytics/_trending.sql") != newContents {
+		t.Error("Expected `skeema lint` to ignore mydb/analytics/_trending.sql, but it did not")
+	}
+	if readFile(t, "mydb/archives/bar.sql") != "CREATE TABLE bar (this is not valid SQL whatever)" {
+		t.Error("Expected `skeema lint` to ignore mydb/archives/bar.sql, but it did not")
+	}
+
+	// pull, lint, init: invalid regexes should error
+	s.handleCommand(t, CodeFatalError, ".", "skeema lint --ignore-schema='+'")
+	s.handleCommand(t, CodeFatalError, ".", "skeema lint --ignore-table='+'")
+	s.handleCommand(t, CodeFatalError, ".", "skeema pull --ignore-table='+'")
+	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir badre1 -h %s -P %d --ignore-schema='+'", s.d.Instance.Host, s.d.Instance.Port)
+	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir badre2 -h %s -P %d --ignore-table='+'", s.d.Instance.Host, s.d.Instance.Port)
+
+}
