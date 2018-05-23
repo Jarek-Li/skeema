@@ -107,9 +107,11 @@ func (dir *Dir) HasFile(name string) bool {
 	return (err == nil)
 }
 
-// HasOptionFile returns true if the directory contains a .skeema option file.
+// HasOptionFile returns true if the directory contains a .skeema option file
+// and the dir isn't hidden. (We do not parse .skeema in hidden directories,
+// to avoid issues with SCM metadata.)
 func (dir *Dir) HasOptionFile() bool {
-	return dir.HasFile(".skeema")
+	return dir.HasFile(".skeema") && dir.BaseName()[0] != '.'
 }
 
 // HasHost returns true if the "host" option has been defined in this dir's
@@ -371,8 +373,8 @@ func (dir *Dir) SQLFiles() ([]*SQLFile, error) {
 
 // Subdirs returns a slice of direct subdirectories of the current dir. An
 // error will be returned if there are problems reading the directory list.
-// If the subdirectory has an option file, it will be read and parsed, with
-// any errors in either step proving fatal.
+// If the subdirectory has an option file (and it isn't a hidden dir), it will
+// be read and parsed, with any errors in either step proving fatal.
 func (dir *Dir) Subdirs() ([]*Dir, error) {
 	fileInfos, err := ioutil.ReadDir(dir.Path)
 	if err != nil {

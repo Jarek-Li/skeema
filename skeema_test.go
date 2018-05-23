@@ -122,6 +122,7 @@ func (s *SkeemaIntegrationSuite) handleCommand(t *testing.T, expectedExitCode in
 	}
 
 	fullCommandLine := fmt.Sprintf(commandLine, a...)
+	fmt.Fprintf(os.Stderr, "\x1b[37;1m%s$\x1b[0m %s\n", filepath.Join("testdata", ".tmpworkspace", pwd), fullCommandLine)
 	fakeFileSource := mybase.SimpleSource(map[string]string{"password": s.d.Instance.Password})
 	cfg := mybase.ParseFakeCLI(t, CommandSuite, fullCommandLine, fakeFileSource)
 	err := cfg.HandleCommand()
@@ -134,7 +135,7 @@ func (s *SkeemaIntegrationSuite) handleCommand(t *testing.T, expectedExitCode in
 		actualExitCode = CodeFatalError
 	}
 	if actualExitCode != expectedExitCode {
-		t.Fatalf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)
+		t.Errorf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)
 	}
 	if pwd != "" && pwd != "." {
 		if err := os.Chdir(s.workspace()); err != nil {

@@ -479,5 +479,33 @@ func (s *SkeemaIntegrationSuite) TestIgnoreOptions(t *testing.T) {
 	s.handleCommand(t, CodeFatalError, ".", "skeema pull --ignore-table='+'")
 	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir badre1 -h %s -P %d --ignore-schema='+'", s.d.Instance.Host, s.d.Instance.Port)
 	s.handleCommand(t, CodeFatalError, ".", "skeema init --dir badre2 -h %s -P %d --ignore-table='+'", s.d.Instance.Host, s.d.Instance.Port)
+}
 
+func (s *SkeemaIntegrationSuite) TestDirEdgeCases(t *testing.T) {
+	s.handleCommand(t, CodeSuccess, ".", "skeema init --dir mydb -h %s -P %d", s.d.Instance.Host, s.d.Instance.Port)
+
+	// Invalid option file should break all commands
+	oldContents := readFile(t, "mydb/.skeema")
+	writeFile(t, "mydb/.skeema", "invalid contents\n")
+	s.handleCommand(t, CodeFatalError, "mydb", "skeema pull")
+	s.handleCommand(t, CodeFatalError, "mydb", "skeema diff")
+	s.handleCommand(t, CodeFatalError, "mydb", "skeema lint")
+	s.handleCommand(t, CodeFatalError, ".", "skeema add-environment --host my.staging.db.com --dir mydb staging")
+	writeFile(t, "mydb/.skeema", oldContents)
+
+	// Hidden directories are ignored, even if they contain a .skeema file, whether
+	// valid or invalid. Extra directories are also ignored if they contain no
+	// .skeema file.
+	writeFile(t, ".hidden/.skeema", "invalid contents\n")
+	writeFile(t, ".hidden/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	writeFile(t, "whatever/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	writeFile(t, "mydb/.hidden/.skeema", "schema=whatever\n")
+	writeFile(t, "mydb/.hidden/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	writeFile(t, "mydb/whatever/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	writeFile(t, "mydb/product/.hidden/.skeema", "schema=whatever\n")
+	writeFile(t, "mydb/product/.hidden/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	writeFile(t, "mydb/product/whatever/whatever.sql", "CREATE TABLE whatever (this is not valid SQL oh well)")
+	s.handleCommand(t, CodeSuccess, ".", "skeema pull")
+	s.handleCommand(t, CodeSuccess, ".", "skeema diff")
+	s.handleCommand(t, CodeSuccess, ".", "skeema lint")
 }
