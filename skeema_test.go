@@ -126,15 +126,7 @@ func (s *SkeemaIntegrationSuite) handleCommand(t *testing.T, expectedExitCode in
 	fakeFileSource := mybase.SimpleSource(map[string]string{"password": s.d.Instance.Password})
 	cfg := mybase.ParseFakeCLI(t, CommandSuite, fullCommandLine, fakeFileSource)
 	err := cfg.HandleCommand()
-	var actualExitCode int
-	if err == nil {
-		actualExitCode = 0
-	} else if ev, ok := err.(*ExitValue); ok {
-		actualExitCode = ev.Code
-	} else {
-		actualExitCode = CodeFatalError
-	}
-	if actualExitCode != expectedExitCode {
+	if actualExitCode := ExitCode(err); actualExitCode != expectedExitCode {
 		t.Errorf("Unexpected exit code from `%s`: Expected code=%d, found code=%d, message=%s", fullCommandLine, expectedExitCode, actualExitCode, err)
 	}
 	if pwd != "" && pwd != "." {
